@@ -1,0 +1,113 @@
+---
+title: "Data Exploration Assignment - Analysis"
+author: "Elias Kazemi"
+date: "2/20/2022"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Loading in Libraries and Data
+
+```{r, message = FALSE, warning=FALSE}
+library(tidyverse)
+library(lubridate)
+library(vtable)
+library(jtools)
+library(ggthemes)
+library(grid)
+library(gridExtra)
+library(lattice)
+```
+First, we read in our clean data and drop the index row:
+
+```{r}
+df <- read.csv('cleandata.csv')
+
+df <- df %>% 
+  select(-c(X))
+```
+
+## Quick Data Adjustments
+
+Next, creating our final dataframe for analysis with median earnings and a before/after scorecard release indicator, omitting any rows with NaN. We are categorizing high earnings colleges as those where the median earnings after 10 years of entry for a given college is higher than the mean of all of the colleges combined.
+
+```{r}
+newdf <- df %>%
+  filter(PREDDEG == 3) %>% 
+  group_by(INSTNM, md_earn_wne_p10.REPORTED.EARNINGS, AfterScorecardRelease) %>%
+  na.omit() %>% 
+  summarize(index_std = mean(index_std, na.rm = TRUE)) 
+
+newdf <- newdf %>%
+  ungroup() %>% 
+  mutate(HighEarning = md_earn_wne_p10.REPORTED.EARNINGS > mean(md_earn_wne_p10.REPORTED.EARNINGS))
+
+
+newdf$HighEarning <- as.numeric(newdf$HighEarning)
+```
+
+We create a variable to differentiate High-earning to Low-earning colleges by making sure the median earnings is higher than the average of the entire dataframe.
+
+# Interaction Model - Above Mean Earnings and Below Mean Earnings
+
+```{r}
+int_model <- lm(index_std ~ AfterScorecardRelease + HighEarning + AfterScorecardRelease * HighEarning, data = newdf) 
+export_summs(int_model, digits = 3)
+```
+
+Our interaction model shows us the impact of the scorecard and whether or not the college was high-earning on our standardized searches (outcome variable). The AfterScorecardRelease and HighEarning variables are binary, so the AfterScorecardRelease coefficient indicates that low-earning colleges (when HighEarningTRUE and  AfterScorecardRelease:HighEarningTRUE outcomes = 0) found a 0.199 decrease in searches standardized and relative to their searches before the release of the scorecard.
+
+Although not statistically significant, the HighEarning variable coefficient indicates that when a college is HighEarning, there is an associated 0.01 increase in the standardized searches before the scorecard was released for high-earning colleges. This means that there may have been a slight increase in searches for high-earning colleges regardless of the release of the scorecard. However, we must note that this value is not statistically significant at the 95% level. 
+
+Our last coefficient shows how much bigger the effect of -0.201 is when the college is high-earning. This indicates that when the college is HighEarning, there is actually a greater decrease in the amount of searches of 0.056, and this is statistically significant. However, this could be a result of how strong the relationship of the scorecard is with searches.
+
+The only statistically significant variable is the release of the scorecard, with a p-value of less than 0.001. However, in terms of the earnings effect on our outcome, we can not be confident to say that there was an effect at all. Therefore, even though the release of the scorecard had an effect on the searches of colleges, we can't be confident that earnings was associated with this change. We can further see this by plotting the coefficients:
+
+```{r}
+plot_coefs(int_model, cl_level = 0.95)
+```
+
+With a 95% confidence interval, we can see that we cannot reject the null hypothesis that whether or not the college was high-earning has any effect on how often the college was searched for relative to itself.
+
+## Interaction Model cont.
+
+We can further see this relationship by simply running a regression on earnings after graduating itself:
+
+```{r}
+int_model2 <- lm(index_std ~ md_earn_wne_p10.REPORTED.EARNINGS + AfterScorecardRelease + md_earn_wne_p10.REPORTED.EARNINGS*AfterScorecardRelease, data = newdf)
+export_summs(int_model2, digits = 3)
+```
+Here we can see that as earnings increases, there isn't really any correlation with our outcome variable of standardized searches. This means that our classification of high-earning and low-earning colleges did not cause our results to show a relationship that was not statistically significant.
+
+# Interaction Model - Graph
+
+```{r}
+grid.arrange(
+
+newdf %>%
+  filter(HighEarning == 1) %>% ggplot(aes(x=AfterScorecardRelease, y=index_std)) + scale_x_continuous(breaks = c(0,1), labels = c('Before Scorecard', 'After Scorecard')) + theme_economist() + geom_smooth(method = lm, size = 1, color = 'dark blue') + ylab('Searches (Standardized)') + ggtitle('High-earning College Searches') + theme(axis.title.x = element_blank(), axis.text.x = element_text(hjust = 0.7), axis.title.y = element_text(size = 9, vjust = 1), plot.title = element_text(hjust = 0.5, size = 11)),
+
+newdf %>%
+  filter(HighEarning == 0) %>% ggplot(aes(x=AfterScorecardRelease, y=index_std)) + scale_x_continuous(breaks = c(0,1), labels = c('Before Scorecard', 'After Scorecard')) + theme_economist() + geom_smooth(method = lm, size = 1, color = 'dark blue') + ylab('Searches (Standardized)') + ggtitle('Low-earning College Searches') + theme(axis.title.x = element_blank(), axis.text.x = element_text(hjust = 0.7), axis.title.y = element_text(size = 9, vjust = 1), plot.title = element_text(hjust = 0.5, size = 11))
+
+)
+```
+
+This graph shows us the difference in the high-earning and low-earning colleges' searches before and after the scorecard was released. As we can see, in the high-earning colleges and low-earning colleges, the scorecard slightly decreased the amount of searches each individual college got, in fact, higher-earning colleges based on our definition saw a greater decrease in searches after the release of the scorecard. The line connects to the mean standardized searches of both categories, so searches were, on average, lower for high-earning colleges relative to each individual college's searches beforehand and vice-versa.
+
+# Conclusion
+
+Although the scorecard did have an impact on the searches of schools, we cannot attribute this change to whether the school was high-earning or low-earning across schools that predominately granted bachelor degrees. This indicates that there must have been some other variables that caused this impact, and across the scorecard data, this could be a number of things.
+
+Something to note is that I included schools regardless of whether or not they were currently operating. However, there were a number of factors that could still impact searches of colleges, including the racial statistics, whether the college was private or public, or what I personally believe to be the most impactful, the degrees that the colleges offer. I personally think that people choose colleges based on their location and what degrees they offer. I'm making the assumption that most people often attend colleges to study what they are interested in, so if the scorecard came out and people noticed that certain schools in a given area offered their preferred areas of interest, they would search those schools more often.
+
+
+

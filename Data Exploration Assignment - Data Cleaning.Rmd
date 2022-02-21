@@ -1,0 +1,106 @@
+---
+title: "Data Exploration Project - Data Cleaning"
+author: "Elias Kazemi"
+date: "2/16/2022"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 2
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Loading Packages
+
+```{r, message = FALSE}
+library(purrr)
+library(dplyr)
+library(tidyverse)
+library(lubridate)
+```
+
+# Data Joining and Cleaning
+
+First, we create the dataframe with merged data from all of the trends files. the trends_up_to_inter_2.csv file's schid column has a file type of character, so we convert this to integer to match the rest of the files and be able to bind rows:
+
+```{r}
+flist <- list.files(pattern = 'trend')
+flist <- flist %>% 
+  map(read.csv)
+
+flist[[2]]$schid <- as.integer(flist[[2]]$schid)
+
+df <- bind_rows(flist)
+```
+Some colleges have names that are the same. Since these are difficult to separate in our analysis, we are only keeping the first occurrence of a college name in our analysis:
+
+```{r}
+id_name_link <- read.csv('id_name_link.csv')
+id_name_link <- id_name_link %>% 
+  group_by(schname) %>% 
+  mutate(N = n()) %>% 
+  filter(N == 1)
+```
+
+We can join the trends data with the id_name_link data by schname:
+
+```{r}
+dfnamelink <- df %>% 
+  left_join(id_name_link, by = 'schname')
+```
+
+And then join the scorecard data to this joined data frame by OPEID. Note that we have to change the column name to uppercase so they join together.
+
+```{r}
+scorecard <- read.csv('Most+Recent+Cohorts+(Scorecard+Elements).csv')
+
+joineddf <- dfnamelink %>% 
+  rename(OPEID = opeid) %>% 
+  left_join(scorecard, by = 'OPEID')
+```
+
+We then have our final dataframe with a new variable index_std to return standardized results of our index variable so that the outcome is relative to each individual school's results.
+
+```{r}
+finaldf <- joineddf %>%
+  group_by(schname, keyword) %>%
+  mutate(index_std = (index - mean(index,na.rm = TRUE))/sd(index, na.rm = TRUE))
+```
+
+We also want to create a singular date variable to see the effect of the release of the scorecard:
+
+```{r}
+finaldf <- finaldf %>%
+  mutate(date = str_sub(monthorweek, 1, 10)) %>%
+  mutate(date = ymd(date)) %>%
+  mutate(AfterScorecardRelease = date > ymd('2015-09-01'))
+```
+
+We can then drop any irrelevant variables by selecting the relevant ones for our analysis. We are keeping any variables we think may be useful in our analysis later on:
+
+```{r}
+finaldf <- finaldf %>% 
+  select(c(keyword, AfterScorecardRelease, PREDDEG, md_earn_wne_p10.REPORTED.EARNINGS, INSTNM, CITY, STABBR, CONTROL, CURROPER, index_std, date))
+```
+
+# Data Transformation
+
+We want our scorecard value to be binary and our earnings variable to be numeric, making those quick adjustments:
+
+```{r}
+finaldf$AfterScorecardRelease <- as.factor(finaldf$AfterScorecardRelease)
+finaldf$md_earn_wne_p10.REPORTED.EARNINGS <- as.numeric(finaldf$md_earn_wne_p10.REPORTED.EARNINGS)
+```
+
+
+# Writing Data to New Files
+
+
+```{r}
+write.csv(finaldf, 'cleandata.csv', row.names = TRUE)
+```
+
